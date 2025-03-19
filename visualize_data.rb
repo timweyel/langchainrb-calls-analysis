@@ -73,3 +73,58 @@ g.labels = average_satisfaction.keys.each_with_index.to_h
 g.write("satisfaction_trend_chart.png")
 
 puts "Satisfaction Trend Chart saved as satisfaction_trend_chart.png!"
+
+# Count topic frequencies to find the top 3
+topic_counts = Hash.new(0)
+calls.each { |row| topic_counts[row["Topic"]] += 1 }
+top_topics = topic_counts.sort_by { |_, count| -count }.first(3).map(&:first)
+
+# Organize sentiment scores by topic and date
+topic_sentiment_trends = Hash.new { |hash, key| hash[key] = Hash.new { |h, k| h[k] = [] } }
+
+calls.each do |row|
+  date = row["Timestamp"].split(" ")[0] # Extract date (YYYY-MM-DD)
+  topic = row["Topic"]
+  sentiment_score = row["Satisfaction Score"].to_f
+
+  # Only keep top 3 topics
+  next unless top_topics.include?(topic)
+
+  topic_sentiment_trends[topic][date] << sentiment_score
+end
+
+# Compute average sentiment per topic per day
+average_sentiment_by_topic = {}
+topic_sentiment_trends.each do |topic, date_scores|
+  daily_avg = date_scores.transform_values { |scores| scores.sum / scores.size }
+
+  # Apply rolling average smoothing
+  dates = daily_avg.keys.sort
+  smoothed_scores = []
+  dates.each_with_index do |date, i|
+    window = dates[[0, i - 1].max..i] # 3-day rolling average
+    smoothed_scores << (window.map { |d| daily_avg[d] }.sum / window.size)
+  end
+
+  average_sentiment_by_topic[topic] = smoothed_scores
+end
+
+# Create a line chart for sentiment trends per topic
+g = Gruff::Line.new
+g.title = "Smoothed Sentiment Trends for Top 3 Topics"
+
+average_sentiment_by_topic.each do |topic, trend|
+  g.data(topic, trend)
+end
+
+# Improve date labels (show every 10th day and rotate them)
+all_dates = topic_sentiment_trends.values.flat_map(&:keys).uniq.sort
+selected_dates = all_dates.each_with_index.select { |_, i| i % 10 == 0 }.map(&:first)
+g.labels = selected_dates.each_with_index.to_h { |date, i| [i * 10, date] }  # Ensure spacing
+g.marker_font_size = 10  # Make the labels smaller for better readability
+g.x_axis_label = "Date"  # Label the x-axis
+g.y_axis_label = "Sentiment Score"  # Label the y-axis
+
+g.write("cleaned_sentiment_trends.png")
+
+puts "Cleaned Sentiment Trends Chart saved as cleaned_sentiment_trends.png!"
